@@ -1,0 +1,14 @@
+version: '2'
+services:
+  server-healthcheck:
+    image: ghcr.io/romancha/server-healthcheck-telegram-bot:latest
+    hostname: server-healthcheck
+    restart: always
+    container_name: server-healthcheck
+
+    environment:
+      - TELEGRAM_TOKEN=
+      - SUPER_USERS=
+      - TELEGRAM_CHAT=
+    volumes:
+      - ./data:/data
