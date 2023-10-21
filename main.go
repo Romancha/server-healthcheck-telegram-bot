@@ -20,7 +20,7 @@ var opts struct {
 
 	AlertThreshold int              `long:"alert-threshold" env:"ALERT_THRESHOLD" description:"Alert threshold" default:"3"`
 	ChecksCron     string           `long:"checks-cron" env:"CHECKS_CRON" description:"Cron spec for checks" default:"*/30 * * * * *"`
-	SuperUsers     events.SuperUser `long:"super-users" env:"SUPER_USERS" description:"Users names who can manage bot"`
+	SuperUsers     events.SuperUser `long:"super" description:"Users names who can manage bot"`
 
 	Debug bool `long:"debug" env:"DEBUG" description:"debug mode"`
 }

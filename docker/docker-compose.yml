@@ -8,7 +8,8 @@ services:
 
     environment:
       - TELEGRAM_TOKEN=
-      - SUPER_USERS=
       - TELEGRAM_CHAT=
     volumes:
       - ./data:/data
+
+    command: /go/bin/app --super=youTelegramUser --super=youTelegramUser2
