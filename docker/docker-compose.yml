@@ -1,7 +1,7 @@
 version: '2'
 services:
   server-healthcheck:
-    image: ghcr.io/romancha/server-healthcheck-telegram-bot:latest
+    image: ghcr.io/romancha/server-healthcheck:latest
     hostname: server-healthcheck
     restart: always
     container_name: server-healthcheck
