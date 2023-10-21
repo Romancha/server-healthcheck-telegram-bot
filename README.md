@@ -12,7 +12,7 @@ server is unavailable.
 Bot sends requests to the servers and checks the response code. If the response code is not 200, the bot
 sends a message to the specified chat.
 
-<img src="images/server_check_screen.jpg" width="400px">
+<img src="images/server_check_screen.jpg" width="600px">
 
 ## Installation and Usage
 
