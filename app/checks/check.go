@@ -22,7 +22,7 @@ type ServerCheck struct {
 var failuresToInform = map[string]int{}
 
 func PerformCheck(bot *tgbotapi.BotAPI, chatId int64, alertThreshold int) {
-	log.Printf("[INFO] Cron job started")
+	log.Printf("[DEBUG] Cron job started")
 
 	var checksData = ReadChecksData()
 
