@@ -26,7 +26,7 @@ To run from Docker, you need to do the following:
 3. Get `chat_id` from [@userinfobot](https://t.me/userinfobot).
 4. Set mandatory
    env [docker-compose.yml](/docker/docker-compose.yml): ``TELEGRAM_TOKEN``, ``TELEGRAM_CHAT`` and args ``super``.
-   https://github.com/Romancha/server-healthcheck-telegram-bot/blob/f3eaf9efbc384083520d3343f1f48560ec211fb3/docker/docker-compose.yml#L1-L14
+   https://github.com/Romancha/server-healthcheck-telegram-bot/blob/f3eaf9efbc384083520d3343f1f48560ec211fb3/docker/docker-compose.yml#L1-L15
 5. Configure the volumes in `docker-compose.yml` to persist servers list.
 6. Run command ``docker-compose up -d``.
 
