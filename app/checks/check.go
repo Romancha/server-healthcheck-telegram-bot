@@ -19,10 +19,13 @@ type ServerCheck struct {
 	IsOk        bool      `json:"isOk"`
 }
 
-var failuresToInform = map[string]int{}
+var serverFailureCount = map[string]int{}
+var serverSendFaultMessage = map[string]bool{}
 
 func PerformCheck(bot *tgbotapi.BotAPI, chatId int64, alertThreshold int) {
 	log.Printf("[DEBUG] Cron job started")
+	log.Printf("[DEBUG] serverFailureCount: %v", serverFailureCount)
+	log.Printf("[DEBUG] serverSendFaultMessage: %v", serverSendFaultMessage)
 
 	var checksData = ReadChecksData()
 
@@ -41,28 +44,31 @@ func PerformCheck(bot *tgbotapi.BotAPI, chatId int64, alertThreshold int) {
 		checksData.HealthChecks[serverCheck.Name] = serverCheck
 
 		if !serverAvailable {
-			failuresToInform[serverCheck.Name]++
+			serverFailureCount[serverCheck.Name]++
 
-			log.Printf("[INFO] Server %s is down %v times", serverCheck.Url, failuresToInform[serverCheck.Url])
-			if failuresToInform[serverCheck.Name] >= alertThreshold {
+			log.Printf("[INFO] Server %s is down %v times", serverCheck.Url, serverFailureCount[serverCheck.Url])
+			if serverFailureCount[serverCheck.Name] >= alertThreshold {
 				msg := tgbotapi.NewMessage(chatId, fmt.Sprintf("❗❗❗ Server %s is down ❗❗❗", serverCheck.Url))
 				_, err := bot.Send(msg)
 				if err != nil {
 					log.Printf("[ERROR] Failed to send message: %v", err)
 				}
 
-				failuresToInform[serverCheck.Name] = 0
+				serverSendFaultMessage[serverCheck.Name] = true
+				serverFailureCount[serverCheck.Name] = 0
 			}
 		} else {
-			if failuresToInform[serverCheck.Name] > 0 {
+			if serverSendFaultMessage[serverCheck.Name] {
 				msg := tgbotapi.NewMessage(chatId, fmt.Sprintf("✅ Server %s is up 🎉", serverCheck.Url))
 				_, err := bot.Send(msg)
 				if err != nil {
 					log.Printf("[ERROR] Failed to send message: %v", err)
 				}
+
+				serverSendFaultMessage[serverCheck.Name] = false
 			}
 
-			failuresToInform[serverCheck.Name] = 0
+			serverFailureCount[serverCheck.Name] = 0
 		}
 
 		// save checks data
