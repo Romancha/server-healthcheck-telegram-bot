@@ -12,7 +12,7 @@ services:
       - ALERT_THRESHOLD=3
       - CHECKS_CRON=*/30 * * * * *
       - HTTP_TIMEOUT=10
-      - SSL_EXPIRY_ALERT=30
+      - SSL_EXPIRY_ALERT=10
       - DEFAULT_RESPONSE_TIME=0
       - DEBUG=false
     volumes:
