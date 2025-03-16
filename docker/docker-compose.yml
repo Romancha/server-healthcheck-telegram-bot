@@ -9,6 +9,12 @@ services:
     environment:
       - TELEGRAM_TOKEN=
       - TELEGRAM_CHAT=
+      - ALERT_THRESHOLD=3
+      - CHECKS_CRON=*/30 * * * * *
+      - HTTP_TIMEOUT=10
+      - SSL_EXPIRY_ALERT=30
+      - DEFAULT_RESPONSE_TIME=0
+      - DEBUG=false
     volumes:
       - ./data:/data
 
