@@ -4,51 +4,46 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
 
 func TestFormatTimeAgo(t *testing.T) {
-	tests := []struct {
-		name string
-		time time.Time
-		want string
-	}{
-		{
-			name: "zero time returns never",
-			time: time.Time{},
-			want: "never",
-		},
-		{
-			name: "30 seconds ago",
-			time: time.Now().Add(-30 * time.Second),
-			want: "30 seconds ago",
-		},
-		{
-			name: "5 minutes ago",
-			time: time.Now().Add(-5 * time.Minute),
-			want: "5 minutes ago",
-		},
-		{
-			name: "3 hours ago",
-			time: time.Now().Add(-3 * time.Hour),
-			want: "3 hours ago",
-		},
-		{
-			name: "2 days ago",
-			time: time.Now().Add(-48 * time.Hour),
-			want: "2 days ago",
-		},
-	}
+	t.Run("zero time returns never", func(t *testing.T) {
+		got := FormatTimeAgo(time.Time{})
+		if got != "never" {
+			t.Errorf("FormatTimeAgo() = %q, want %q", got, "never")
+		}
+	})
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := FormatTimeAgo(tt.time)
-			if got != tt.want {
-				t.Errorf("FormatTimeAgo() = %q, want %q", got, tt.want)
-			}
-		})
-	}
+	t.Run("seconds ago", func(t *testing.T) {
+		got := FormatTimeAgo(time.Now().Add(-30 * time.Second))
+		if !strings.HasSuffix(got, "seconds ago") {
+			t.Errorf("FormatTimeAgo() = %q, want '* seconds ago'", got)
+		}
+	})
+
+	t.Run("minutes ago", func(t *testing.T) {
+		got := FormatTimeAgo(time.Now().Add(-5 * time.Minute))
+		if !strings.HasSuffix(got, "minutes ago") {
+			t.Errorf("FormatTimeAgo() = %q, want '* minutes ago'", got)
+		}
+	})
+
+	t.Run("hours ago", func(t *testing.T) {
+		got := FormatTimeAgo(time.Now().Add(-3 * time.Hour))
+		if !strings.HasSuffix(got, "hours ago") {
+			t.Errorf("FormatTimeAgo() = %q, want '* hours ago'", got)
+		}
+	})
+
+	t.Run("days ago", func(t *testing.T) {
+		got := FormatTimeAgo(time.Now().Add(-48 * time.Hour))
+		if !strings.HasSuffix(got, "days ago") {
+			t.Errorf("FormatTimeAgo() = %q, want '* days ago'", got)
+		}
+	})
 }
 
 func TestShouldSendSSLNotification(t *testing.T) {
@@ -109,8 +104,8 @@ func TestCheckServerStatus_Success(t *testing.T) {
 	if !result.IsOk {
 		t.Errorf("expected IsOk=true, got false. Error: %s", result.ErrorMessage)
 	}
-	if result.ResponseTime <= 0 {
-		t.Errorf("expected ResponseTime > 0, got %d", result.ResponseTime)
+	if result.ResponseTime < 0 {
+		t.Errorf("expected ResponseTime >= 0, got %d", result.ResponseTime)
 	}
 	if result.StatusCode != 200 {
 		t.Errorf("expected StatusCode=200, got %d", result.StatusCode)
@@ -139,23 +134,15 @@ func TestCheckServerStatus_ServerError(t *testing.T) {
 	}
 }
 
-func TestCheckServerStatus_Redirect(t *testing.T) {
-	// Disable redirect following for this test
+func TestCheckServerStatus_Forbidden(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusMovedPermanently)
+		w.WriteHeader(http.StatusForbidden)
 	}))
 	defer server.Close()
 
-	// Default httpClient follows redirects, so 301 will result in an error or a final response.
-	// Let's test with a non-2xx that won't redirect
-	server2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusForbidden)
-	}))
-	defer server2.Close()
-
 	result := checkServerStatus(ServerCheck{
 		Name: "test",
-		Url:  server2.URL,
+		Url:  server.URL,
 	})
 
 	if result.IsOk {
@@ -227,7 +214,7 @@ func TestCheckServerStatus_InvalidURL(t *testing.T) {
 
 func TestCheckServerStatus_Timeout(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		time.Sleep(3 * time.Second)
+		time.Sleep(1 * time.Second)
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer server.Close()

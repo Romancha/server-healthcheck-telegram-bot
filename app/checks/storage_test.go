@@ -167,23 +167,23 @@ func TestConcurrentReadWrite(t *testing.T) {
 	var wg sync.WaitGroup
 	const goroutines = 10
 
-	// Concurrent reads
+	// Use a barrier so all goroutines start at the same time
+	start := make(chan struct{})
+
+	// Mix reads and writes in a single loop for true concurrency
 	for i := 0; i < goroutines; i++ {
-		wg.Add(1)
+		wg.Add(2)
 		go func() {
 			defer wg.Done()
+			<-start
 			got := ReadChecksData()
 			if got.HealthChecks == nil {
 				t.Error("ReadChecksData returned nil HealthChecks")
 			}
 		}()
-	}
-
-	// Concurrent writes
-	for i := 0; i < goroutines; i++ {
-		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			<-start
 			err := SaveChecksData(data)
 			if err != nil {
 				t.Errorf("SaveChecksData: %v", err)
@@ -191,5 +191,6 @@ func TestConcurrentReadWrite(t *testing.T) {
 		}()
 	}
 
+	close(start) // release all goroutines at once
 	wg.Wait()
 }
