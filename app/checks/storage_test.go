@@ -1,0 +1,195 @@
+package checks
+
+import (
+	"os"
+	"path/filepath"
+	"sync"
+	"testing"
+	"time"
+)
+
+// setupTestStorage sets storageLocation to a temp dir and returns a cleanup func.
+func setupTestStorage(t *testing.T) func() {
+	t.Helper()
+	tmpDir := t.TempDir()
+	original := storageLocation
+	storageLocation = filepath.Join(tmpDir, "checks.json")
+	return func() {
+		storageLocation = original
+	}
+}
+
+func TestInitStorage(t *testing.T) {
+	cleanup := setupTestStorage(t)
+	defer cleanup()
+
+	// File should not exist yet
+	if _, err := os.Stat(storageLocation); !os.IsNotExist(err) {
+		t.Fatal("expected storage file to not exist before InitStorage")
+	}
+
+	InitStorage()
+
+	// File should exist now
+	info, err := os.Stat(storageLocation)
+	if err != nil {
+		t.Fatalf("expected storage file to exist after InitStorage: %v", err)
+	}
+	if info.Size() == 0 {
+		t.Fatal("expected storage file to have content after InitStorage")
+	}
+}
+
+func TestInitStorageIdempotent(t *testing.T) {
+	cleanup := setupTestStorage(t)
+	defer cleanup()
+
+	InitStorage()
+
+	// Write some data
+	data := Data{
+		HealthChecks: map[string]ServerCheck{
+			"test": {Name: "test", Url: "https://example.com"},
+		},
+	}
+	err := SaveChecksData(data)
+	if err != nil {
+		t.Fatalf("SaveChecksData: %v", err)
+	}
+
+	// Call InitStorage again — should NOT overwrite existing file
+	InitStorage()
+
+	got := ReadChecksData()
+	if _, ok := got.HealthChecks["test"]; !ok {
+		t.Fatal("InitStorage overwrote existing data")
+	}
+}
+
+func TestSaveAndReadChecksData(t *testing.T) {
+	cleanup := setupTestStorage(t)
+	defer cleanup()
+	InitStorage()
+
+	now := time.Now().Truncate(time.Second)
+
+	data := Data{
+		HealthChecks: map[string]ServerCheck{
+			"server1": {
+				Name:             "server1",
+				Url:              "https://example.com",
+				IsOk:             true,
+				LastSuccess:      now,
+				Availability:     99.5,
+				TotalChecks:      200,
+				SuccessfulChecks: 199,
+				LastResponseTime: 42,
+			},
+			"server2": {
+				Name:            "server2",
+				Url:             "https://test.com",
+				IsOk:            false,
+				LastFailure:     now,
+				ExpectedContent: "OK",
+			},
+		},
+	}
+
+	err := SaveChecksData(data)
+	if err != nil {
+		t.Fatalf("SaveChecksData: %v", err)
+	}
+
+	got := ReadChecksData()
+
+	if len(got.HealthChecks) != 2 {
+		t.Fatalf("expected 2 servers, got %d", len(got.HealthChecks))
+	}
+
+	s1 := got.HealthChecks["server1"]
+	if s1.Url != "https://example.com" {
+		t.Errorf("server1.Url = %q, want %q", s1.Url, "https://example.com")
+	}
+	if !s1.IsOk {
+		t.Error("server1.IsOk = false, want true")
+	}
+	if s1.Availability != 99.5 {
+		t.Errorf("server1.Availability = %f, want 99.5", s1.Availability)
+	}
+	if s1.TotalChecks != 200 {
+		t.Errorf("server1.TotalChecks = %d, want 200", s1.TotalChecks)
+	}
+	if s1.LastResponseTime != 42 {
+		t.Errorf("server1.LastResponseTime = %d, want 42", s1.LastResponseTime)
+	}
+
+	s2 := got.HealthChecks["server2"]
+	if s2.ExpectedContent != "OK" {
+		t.Errorf("server2.ExpectedContent = %q, want %q", s2.ExpectedContent, "OK")
+	}
+}
+
+func TestSaveAndReadEmptyData(t *testing.T) {
+	cleanup := setupTestStorage(t)
+	defer cleanup()
+	InitStorage()
+
+	data := Data{
+		HealthChecks: make(map[string]ServerCheck),
+	}
+
+	err := SaveChecksData(data)
+	if err != nil {
+		t.Fatalf("SaveChecksData: %v", err)
+	}
+
+	got := ReadChecksData()
+	if len(got.HealthChecks) != 0 {
+		t.Fatalf("expected 0 servers, got %d", len(got.HealthChecks))
+	}
+}
+
+func TestConcurrentReadWrite(t *testing.T) {
+	cleanup := setupTestStorage(t)
+	defer cleanup()
+	InitStorage()
+
+	// Seed initial data
+	data := Data{
+		HealthChecks: map[string]ServerCheck{
+			"s1": {Name: "s1", Url: "https://example.com", IsOk: true},
+		},
+	}
+	if err := SaveChecksData(data); err != nil {
+		t.Fatalf("SaveChecksData: %v", err)
+	}
+
+	var wg sync.WaitGroup
+	const goroutines = 10
+
+	// Concurrent reads
+	for i := 0; i < goroutines; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			got := ReadChecksData()
+			if got.HealthChecks == nil {
+				t.Error("ReadChecksData returned nil HealthChecks")
+			}
+		}()
+	}
+
+	// Concurrent writes
+	for i := 0; i < goroutines; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			err := SaveChecksData(data)
+			if err != nil {
+				t.Errorf("SaveChecksData: %v", err)
+			}
+		}()
+	}
+
+	wg.Wait()
+}

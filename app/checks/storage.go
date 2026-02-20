@@ -4,17 +4,23 @@ import (
 	"encoding/json"
 	"log"
 	"os"
+	"path/filepath"
 	"sync"
 )
 
 var mutex sync.Mutex
 var storageLocation = "data/checks.json"
 
+// SetStorageLocation overrides the default storage file path (used in tests)
+func SetStorageLocation(path string) {
+	storageLocation = path
+}
+
 func SaveChecksData(checksData Data) error {
 	mutex.Lock()
 	defer mutex.Unlock()
 
-	file, err := os.Create("data/checks.json")
+	file, err := os.Create(storageLocation)
 	if err != nil {
 		return err
 	}
@@ -52,7 +58,7 @@ func ReadChecksData() Data {
 
 func InitStorage() {
 	if _, err := os.Stat(storageLocation); os.IsNotExist(err) {
-		err = os.MkdirAll("data", os.ModePerm)
+		err = os.MkdirAll(filepath.Dir(storageLocation), os.ModePerm)
 
 		file, err := os.Create(storageLocation)
 		if err != nil {
