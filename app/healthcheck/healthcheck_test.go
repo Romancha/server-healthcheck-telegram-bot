@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -15,15 +16,15 @@ import (
 func newTestBot(t *testing.T, failAfterInit bool) *tgbotapi.BotAPI {
 	t.Helper()
 
-	getMeCalls := 0
+	var getMeCalls atomic.Int32
 	tgServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 
 		if strings.Contains(r.URL.Path, "getMe") {
-			getMeCalls++
+			n := getMeCalls.Add(1)
 			// First call is during bot init — always succeed.
 			// Subsequent calls fail if failAfterInit is true.
-			if failAfterInit && getMeCalls > 1 {
+			if failAfterInit && n > 1 {
 				json.NewEncoder(w).Encode(map[string]interface{}{
 					"ok":          false,
 					"description": "Unauthorized",

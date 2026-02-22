@@ -107,10 +107,12 @@ func newTestBot(t *testing.T) (*tgbotapi.BotAPI, *testBotMessages) {
 }
 
 // setupTestStorage redirects checks storage to a temp dir and initializes it.
+// Restores original storage location via t.Cleanup.
 func setupTestStorage(t *testing.T) {
 	t.Helper()
 	tmpDir := t.TempDir()
-	checks.SetStorageLocation(filepath.Join(tmpDir, "checks.json"))
+	original := checks.SetStorageLocation(filepath.Join(tmpDir, "checks.json"))
+	t.Cleanup(func() { checks.SetStorageLocation(original) })
 	checks.InitStorage()
 }
 
@@ -646,6 +648,43 @@ func TestProcessUpdate_CallbackQuery_Remove(t *testing.T) {
 	}
 }
 
+func TestProcessUpdate_CallbackQuery_NonSuperUser_Ignored(t *testing.T) {
+	setupTestStorage(t)
+
+	data := checks.Data{
+		HealthChecks: map[string]checks.ServerCheck{
+			"web": {Name: "web", Url: "https://web.com"},
+		},
+	}
+	if err := checks.SaveChecksData(data); err != nil {
+		t.Fatalf("SaveChecksData: %v", err)
+	}
+
+	bot, _ := newTestBot(t)
+	superUsers := SuperUser{"admin"}
+
+	// Non-superuser tries to remove via callback
+	update := tgbotapi.Update{
+		CallbackQuery: &tgbotapi.CallbackQuery{
+			ID:   "456",
+			Data: "remove:web",
+			Message: &tgbotapi.Message{
+				MessageID: 1,
+				Chat:      &tgbotapi.Chat{ID: 123, Type: "private"},
+			},
+			From: &tgbotapi.User{UserName: "hacker"},
+		},
+	}
+
+	processUpdate(bot, update, superUsers)
+
+	// Server should NOT be removed
+	got := checks.ReadChecksData()
+	if _, ok := got.HealthChecks["web"]; !ok {
+		t.Error("non-superuser should not be able to remove server via callback")
+	}
+}
+
 func TestProcessUpdate_NilMessage_Ignored(t *testing.T) {
 	bot, sent := newTestBot(t)
 	superUsers := SuperUser{"admin"}
@@ -670,5 +709,89 @@ func TestProcessUpdate_SuperUserCaseInsensitive(t *testing.T) {
 
 	if sent.count() == 0 {
 		t.Error("expected superuser check to be case-insensitive")
+	}
+}
+
+func TestProcessUpdate_Remove_NoArgs(t *testing.T) {
+	setupTestStorage(t)
+	bot, sent := newTestBot(t)
+	superUsers := SuperUser{"admin"}
+
+	update := makeCommandUpdate("remove", "", "admin")
+	processUpdate(bot, update, superUsers)
+
+	if sent.count() == 0 {
+		t.Fatal("expected usage message")
+	}
+	if !strings.Contains(sent.last(), "Usage") {
+		t.Errorf("expected usage message, got %q", sent.last())
+	}
+}
+
+func TestProcessUpdate_SetSSLThreshold(t *testing.T) {
+	setupTestStorage(t)
+
+	data := checks.Data{
+		HealthChecks: map[string]checks.ServerCheck{
+			"api": {Name: "api", Url: "https://api.com"},
+		},
+	}
+	if err := checks.SaveChecksData(data); err != nil {
+		t.Fatalf("SaveChecksData: %v", err)
+	}
+
+	bot, sent := newTestBot(t)
+	superUsers := SuperUser{"admin"}
+
+	update := makeCommandUpdate("setsslthreshold", "api 14", "admin")
+	processUpdate(bot, update, superUsers)
+
+	got := checks.ReadChecksData()
+	srv := got.HealthChecks["api"]
+	if srv.SSLExpiryThreshold != 14 {
+		t.Errorf("expected SSLExpiryThreshold=14, got %d", srv.SSLExpiryThreshold)
+	}
+
+	if !strings.Contains(sent.last(), "14 days") {
+		t.Errorf("expected confirmation with threshold, got %q", sent.last())
+	}
+}
+
+func TestProcessUpdate_SetSSLThreshold_ServerNotFound(t *testing.T) {
+	setupTestStorage(t)
+	bot, sent := newTestBot(t)
+	superUsers := SuperUser{"admin"}
+
+	update := makeCommandUpdate("setsslthreshold", "ghost 14", "admin")
+	processUpdate(bot, update, superUsers)
+
+	if !strings.Contains(sent.last(), "not found") {
+		t.Errorf("expected 'not found', got %q", sent.last())
+	}
+}
+
+func TestProcessUpdate_SetGlobalSSLThreshold(t *testing.T) {
+	setupTestStorage(t)
+	bot, sent := newTestBot(t)
+	superUsers := SuperUser{"admin"}
+
+	update := makeCommandUpdate("setglobalsslthreshold", "60", "admin")
+	processUpdate(bot, update, superUsers)
+
+	if !strings.Contains(sent.last(), "60 days") {
+		t.Errorf("expected confirmation with '60 days', got %q", sent.last())
+	}
+}
+
+func TestProcessUpdate_SetGlobalSSLThreshold_NoArgs(t *testing.T) {
+	setupTestStorage(t)
+	bot, sent := newTestBot(t)
+	superUsers := SuperUser{"admin"}
+
+	update := makeCommandUpdate("setglobalsslthreshold", "", "admin")
+	processUpdate(bot, update, superUsers)
+
+	if !strings.Contains(sent.last(), "Usage") {
+		t.Errorf("expected usage message, got %q", sent.last())
 	}
 }

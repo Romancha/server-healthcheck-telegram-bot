@@ -11,9 +11,12 @@ import (
 var mutex sync.Mutex
 var storageLocation = "data/checks.json"
 
-// SetStorageLocation overrides the default storage file path (used in tests)
-func SetStorageLocation(path string) {
+// SetStorageLocation overrides the default storage file path (used in tests).
+// Returns the previous location so callers can restore it.
+func SetStorageLocation(path string) string {
+	prev := storageLocation
 	storageLocation = path
+	return prev
 }
 
 func SaveChecksData(checksData Data) error {

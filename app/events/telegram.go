@@ -48,7 +48,7 @@ func ListenTelegramUpdates(ctx context.Context, bot *tgbotapi.BotAPI, superUsers
 func processUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, superUsers SuperUser) {
 	// Handle callback queries (inline button clicks)
 	if update.CallbackQuery != nil {
-		handleCallbackQuery(bot, update.CallbackQuery)
+		handleCallbackQuery(bot, update.CallbackQuery, superUsers)
 		return
 	}
 
@@ -328,10 +328,15 @@ func processUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, superUsers Supe
 	}
 }
 
-func handleCallbackQuery(bot *tgbotapi.BotAPI, query *tgbotapi.CallbackQuery) {
+func handleCallbackQuery(bot *tgbotapi.BotAPI, query *tgbotapi.CallbackQuery, superUsers SuperUser) {
 	// Answer callback query to remove loading indicator
 	callback := tgbotapi.NewCallback(query.ID, "")
 	bot.Request(callback)
+
+	// Check if user is authorized
+	if !superUsers.IsSuper(query.From.UserName) {
+		return
+	}
 
 	// Parse callback data
 	parts := strings.Split(query.Data, ":")

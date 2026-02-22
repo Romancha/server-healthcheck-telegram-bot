@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -279,9 +280,10 @@ func TestCheckServerStatus_ContentMismatch(t *testing.T) {
 }
 
 func TestCheckServerStatus_InvalidURL(t *testing.T) {
+	// Use closed localhost port for instant failure without DNS lookup
 	result := checkServerStatus(ServerCheck{
 		Name: "test",
-		Url:  "http://invalid.server.that.does.not.exist.example:9999",
+		Url:  "http://127.0.0.1:1",
 	})
 
 	if result.IsOk {
@@ -294,14 +296,14 @@ func TestCheckServerStatus_InvalidURL(t *testing.T) {
 
 func TestCheckServerStatus_Timeout(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		time.Sleep(1 * time.Second)
+		time.Sleep(200 * time.Millisecond)
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer server.Close()
 
 	// Save and restore original timeout
 	origTimeout := httpClient.Timeout
-	ConfigureHttpClient(500 * time.Millisecond)
+	ConfigureHttpClient(50 * time.Millisecond)
 	defer ConfigureHttpClient(origTimeout)
 
 	result := checkServerStatus(ServerCheck{
@@ -492,10 +494,11 @@ func TestPerformCheck_ServerRecovers_SendsRecoveryMessage(t *testing.T) {
 	cleanup := setupPerformCheckTest(t)
 	defer cleanup()
 
-	// Start with a failing server
-	failing := true
+	// Start with a failing server; use atomic to avoid data race with handler goroutine
+	var failing atomic.Bool
+	failing.Store(true)
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if failing {
+		if failing.Load() {
 			w.WriteHeader(http.StatusInternalServerError)
 		} else {
 			w.WriteHeader(http.StatusOK)
@@ -521,7 +524,7 @@ func TestPerformCheck_ServerRecovers_SendsRecoveryMessage(t *testing.T) {
 	}
 
 	// Now recover
-	failing = false
+	failing.Store(false)
 	PerformCheck(bot, 123, alertThreshold)
 
 	// Should have: 1 "down" alert + 1 "is up" recovery
@@ -547,10 +550,10 @@ func TestPerformCheck_ServerRecovers_WithoutPriorAlert_NoRecoveryMessage(t *test
 	defer cleanup()
 
 	// Server fails once then recovers — below threshold, so no alert was sent
-	callCount := 0
+	var callCount atomic.Int32
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		callCount++
-		if callCount == 1 {
+		n := callCount.Add(1)
+		if n == 1 {
 			w.WriteHeader(http.StatusInternalServerError)
 		} else {
 			w.WriteHeader(http.StatusOK)
