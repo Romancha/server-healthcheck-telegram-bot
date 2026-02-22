@@ -14,8 +14,16 @@ services:
       - HTTP_TIMEOUT=10
       - SSL_EXPIRY_ALERT=10
       - DEFAULT_RESPONSE_TIME=0
+      - HEALTH_PORT=8081
       - DEBUG=false
     volumes:
       - ./data:/data
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
 
     command: /go/bin/app --super=youTelegramUser --super=youTelegramUser2

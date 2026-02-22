@@ -1,13 +1,17 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/Romancha/server-healthcheck-telegram-bot/app/checks"
 	"github.com/Romancha/server-healthcheck-telegram-bot/app/events"
+	"github.com/Romancha/server-healthcheck-telegram-bot/app/healthcheck"
 	"github.com/go-pkgz/lgr"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/jessevdk/go-flags"
@@ -26,6 +30,7 @@ var opts struct {
 	HttpTimeout         int              `long:"http-timeout" env:"HTTP_TIMEOUT" description:"HTTP request timeout in seconds" default:"10"`
 	SSLExpiryAlertDays  int              `long:"ssl-expiry-alert" env:"SSL_EXPIRY_ALERT" description:"Days before SSL expiry to start alerting" default:"30"`
 	DefaultResponseTime int              `long:"default-response-time" env:"DEFAULT_RESPONSE_TIME" description:"Default response time threshold in milliseconds (0 to disable)" default:"0"`
+	HealthPort          string           `long:"health-port" env:"HEALTH_PORT" description:"Port for health check HTTP server" default:"8081"`
 
 	Debug bool `long:"debug" env:"DEBUG" description:"debug mode"`
 }
@@ -60,6 +65,18 @@ func main() {
 		log.Printf("[ERROR] Failed to send start message: %v", err)
 	}
 
+	// Context for graceful shutdown
+	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer cancel()
+
+	// Start health check HTTP server
+	go func() {
+		if err := healthcheck.Start(ctx, ":"+opts.HealthPort, bot); err != nil {
+			log.Printf("[ERROR] Health check server failed: %v", err)
+		}
+	}()
+
+	// Start cron scheduler
 	c := cron.New(cron.WithSeconds())
 	_, err = c.AddFunc(opts.ChecksCron, func() {
 		checks.PerformCheck(bot, opts.Telegram.Chat, opts.AlertThreshold)
@@ -69,7 +86,24 @@ func main() {
 	}
 	c.Start()
 
-	events.ListenTelegramUpdates(bot, opts.SuperUsers)
+	// Start listening for Telegram updates (blocks until context is cancelled)
+	go events.ListenTelegramUpdates(ctx, bot, opts.SuperUsers)
+
+	// Wait for shutdown signal
+	<-ctx.Done()
+	log.Printf("[INFO] Shutdown signal received, stopping...")
+
+	// Stop cron scheduler
+	c.Stop()
+	log.Printf("[INFO] Cron scheduler stopped")
+
+	// Send shutdown message
+	_, err = bot.Send(tgbotapi.NewMessage(opts.Telegram.Chat, "Server health check bot stopped"))
+	if err != nil {
+		log.Printf("[ERROR] Failed to send stop message: %v", err)
+	}
+
+	log.Printf("[INFO] Bot stopped gracefully")
 }
 
 // setupBotCommands configures the commands menu shown in Telegram

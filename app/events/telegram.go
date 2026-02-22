@@ -1,6 +1,7 @@
 package events
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"strings"
@@ -23,292 +24,306 @@ const (
 	ActionDetails         = "details"
 )
 
-func ListenTelegramUpdates(bot *tgbotapi.BotAPI, superUsers SuperUser) {
+func ListenTelegramUpdates(ctx context.Context, bot *tgbotapi.BotAPI, superUsers SuperUser) {
 	u := tgbotapi.NewUpdate(0)
 	u.Timeout = 60
 
 	updates := bot.GetUpdatesChan(u)
 
-	for update := range updates {
-		// Handle callback queries (inline button clicks)
-		if update.CallbackQuery != nil {
-			handleCallbackQuery(bot, update.CallbackQuery)
-			continue
+	for {
+		select {
+		case <-ctx.Done():
+			bot.StopReceivingUpdates()
+			log.Printf("[INFO] Stopped receiving Telegram updates")
+			return
+		case update, ok := <-updates:
+			if !ok {
+				return
+			}
+			processUpdate(bot, update, superUsers)
 		}
+	}
+}
 
-		// Ignore if no message
-		if update.Message == nil {
-			continue
-		}
+func processUpdate(bot *tgbotapi.BotAPI, update tgbotapi.Update, superUsers SuperUser) {
+	// Handle callback queries (inline button clicks)
+	if update.CallbackQuery != nil {
+		handleCallbackQuery(bot, update.CallbackQuery)
+		return
+	}
 
-		// check if is not superuser, ignore
-		if !superUsers.IsSuper(update.Message.From.UserName) {
-			continue
-		}
+	// Ignore if no message
+	if update.Message == nil {
+		return
+	}
 
-		if update.Message.IsCommand() {
-			command := strings.ToLower(update.Message.Command())
+	// check if is not superuser, ignore
+	if !superUsers.IsSuper(update.Message.From.UserName) {
+		return
+	}
 
-			switch command {
-			case "add":
-				// Check if command arguments are empty
-				if update.Message.CommandArguments() == "" {
-					bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID,
-						"Please provide a URL. Usage: /add [url] [name]"))
-					continue
+	if update.Message.IsCommand() {
+		command := strings.ToLower(update.Message.Command())
+
+		switch command {
+		case "add":
+			// Check if command arguments are empty
+			if update.Message.CommandArguments() == "" {
+				bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID,
+					"Please provide a URL. Usage: /add [url] [name]"))
+				return
+			}
+
+			var server = getServer(update.Message)
+
+			// Check if URL is empty
+			if server.Url == "" || server.Url == "https://" || server.Url == "http://" {
+				bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID,
+					"URL cannot be empty. Usage: /add [url] [name]"))
+				return
+			}
+
+			var checksData = checks.ReadChecksData()
+
+			if _, ok := checksData.HealthChecks[server.Name]; ok {
+				msg := tgbotapi.NewMessage(update.Message.Chat.ID, "Server already exists")
+				bot.Send(msg)
+				return
+			} else {
+				if checksData.HealthChecks == nil {
+					checksData.HealthChecks = make(map[string]checks.ServerCheck)
 				}
 
-				var server = getServer(update.Message)
-
-				// Check if URL is empty
-				if server.Url == "" || server.Url == "https://" || server.Url == "http://" {
-					bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID,
-						"URL cannot be empty. Usage: /add [url] [name]"))
-					continue
+				checksData.HealthChecks[server.Name] = checks.ServerCheck{
+					Name: server.Name,
+					Url:  server.Url,
+					IsOk: false,
 				}
+			}
 
-				var checksData = checks.ReadChecksData()
-
-				if _, ok := checksData.HealthChecks[server.Name]; ok {
-					msg := tgbotapi.NewMessage(update.Message.Chat.ID, "Server already exists")
-					bot.Send(msg)
-					continue
-				} else {
-					if checksData.HealthChecks == nil {
-						checksData.HealthChecks = make(map[string]checks.ServerCheck)
-					}
-
-					checksData.HealthChecks[server.Name] = checks.ServerCheck{
-						Name: server.Name,
-						Url:  server.Url,
-						IsOk: false,
-					}
-				}
-
-				saveError := checks.SaveChecksData(checksData)
-				if saveError != nil {
-					log.Printf("[ERROR] Failed to save checks data: %v", saveError)
-					bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID,
-						fmt.Sprintf("Failed to add server %s [%s]", server.Name, server.Url)),
-					)
-					continue
-				}
-
-				bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID, fmt.Sprintf(
-					"Server %s [%s] added", server.Name, server.Url)),
+			saveError := checks.SaveChecksData(checksData)
+			if saveError != nil {
+				log.Printf("[ERROR] Failed to save checks data: %v", saveError)
+				bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID,
+					fmt.Sprintf("Failed to add server %s [%s]", server.Name, server.Url)),
 				)
+				return
+			}
 
-			case "remove":
-				// Check if command arguments are empty
-				if update.Message.CommandArguments() == "" {
-					bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID,
-						"Please provide a server name. Usage: /remove [name]"))
-					continue
-				}
+			bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID, fmt.Sprintf(
+				"Server %s [%s] added", server.Name, server.Url)),
+			)
 
-				var server = getServer(update.Message)
+		case "remove":
+			// Check if command arguments are empty
+			if update.Message.CommandArguments() == "" {
+				bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID,
+					"Please provide a server name. Usage: /remove [name]"))
+				return
+			}
 
-				// Check if server name is empty
-				if server.Name == "" {
-					bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID,
-						"Server name cannot be empty. Usage: /remove [name]"))
-					continue
-				}
+			var server = getServer(update.Message)
 
-				var checksData = checks.ReadChecksData()
+			// Check if server name is empty
+			if server.Name == "" {
+				bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID,
+					"Server name cannot be empty. Usage: /remove [name]"))
+				return
+			}
 
-				if _, ok := checksData.HealthChecks[server.Name]; ok {
-					delete(checksData.HealthChecks, server.Name)
-					msg := tgbotapi.NewMessage(update.Message.Chat.ID, fmt.Sprintf(
-						"Server %s removed", server.Name),
-					)
-					bot.Send(msg)
-				} else {
-					msg := tgbotapi.NewMessage(
-						update.Message.Chat.ID, fmt.Sprintf("Server %s not exists", server.Name),
-					)
-					bot.Send(msg)
-					continue
-				}
+			var checksData = checks.ReadChecksData()
 
-				saveError := checks.SaveChecksData(checksData)
-				if saveError != nil {
-					log.Printf("[ERROR] Failed to save checks data: %v", saveError)
-					bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID,
-						fmt.Sprintf("Failed to remove server %s", server)),
-					)
-					continue
-				}
+			if _, ok := checksData.HealthChecks[server.Name]; ok {
+				delete(checksData.HealthChecks, server.Name)
+				msg := tgbotapi.NewMessage(update.Message.Chat.ID, fmt.Sprintf(
+					"Server %s removed", server.Name),
+				)
+				bot.Send(msg)
+			} else {
+				msg := tgbotapi.NewMessage(
+					update.Message.Chat.ID, fmt.Sprintf("Server %s not exists", server.Name),
+				)
+				bot.Send(msg)
+				return
+			}
 
-			case "removeall":
-				var emptyData = checks.Data{
-					HealthChecks: make(map[string]checks.ServerCheck),
-				}
+			saveError := checks.SaveChecksData(checksData)
+			if saveError != nil {
+				log.Printf("[ERROR] Failed to save checks data: %v", saveError)
+				bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID,
+					fmt.Sprintf("Failed to remove server %s", server)),
+				)
+				return
+			}
 
-				saveError := checks.SaveChecksData(emptyData)
-				if saveError != nil {
-					log.Printf("[ERROR] Failed to save checks data: %v", saveError)
-					bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID,
-						fmt.Sprintf("Failed to remove all servers")),
-					)
-					continue
-				}
+		case "removeall":
+			var emptyData = checks.Data{
+				HealthChecks: make(map[string]checks.ServerCheck),
+			}
 
-				bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID, "All servers removed"))
+			saveError := checks.SaveChecksData(emptyData)
+			if saveError != nil {
+				log.Printf("[ERROR] Failed to save checks data: %v", saveError)
+				bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID,
+					fmt.Sprintf("Failed to remove all servers")),
+				)
+				return
+			}
 
-			case "list":
-				sendServerList(bot, update.Message.Chat.ID)
+			bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID, "All servers removed"))
 
-			case "stats":
-				sendServerStats(bot, update.Message.Chat.ID)
+		case "list":
+			sendServerList(bot, update.Message.Chat.ID)
 
-			case "help":
-				sendHelpMessage(bot, update.Message.Chat.ID)
+		case "stats":
+			sendServerStats(bot, update.Message.Chat.ID)
 
-			case "setresponsetime":
-				args := strings.Split(update.Message.CommandArguments(), " ")
-				if len(args) < 2 {
-					bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID,
-						"Usage: /setresponsetime [server_name] [threshold_ms]"))
-					continue
-				}
+		case "help":
+			sendHelpMessage(bot, update.Message.Chat.ID)
 
-				serverName := args[0]
-				thresholdStr := args[1]
+		case "setresponsetime":
+			args := strings.Split(update.Message.CommandArguments(), " ")
+			if len(args) < 2 {
+				bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID,
+					"Usage: /setresponsetime [server_name] [threshold_ms]"))
+				return
+			}
 
-				// Parse threshold
-				var threshold int
-				_, err := fmt.Sscanf(thresholdStr, "%d", &threshold)
+			serverName := args[0]
+			thresholdStr := args[1]
+
+			// Parse threshold
+			var threshold int
+			_, err := fmt.Sscanf(thresholdStr, "%d", &threshold)
+			if err != nil {
+				bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID,
+					"Invalid threshold value. Please provide a number in milliseconds."))
+				return
+			}
+
+			// Update server
+			checksData := checks.ReadChecksData()
+			if server, ok := checksData.HealthChecks[serverName]; ok {
+				server.ResponseTimeThreshold = threshold
+				checksData.HealthChecks[serverName] = server
+
+				err := checks.SaveChecksData(checksData)
 				if err != nil {
 					bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID,
-						"Invalid threshold value. Please provide a number in milliseconds."))
-					continue
+						fmt.Sprintf("Failed to update response time threshold: %v", err)))
+					return
 				}
-
-				// Update server
-				checksData := checks.ReadChecksData()
-				if server, ok := checksData.HealthChecks[serverName]; ok {
-					server.ResponseTimeThreshold = threshold
-					checksData.HealthChecks[serverName] = server
-
-					err := checks.SaveChecksData(checksData)
-					if err != nil {
-						bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID,
-							fmt.Sprintf("Failed to update response time threshold: %v", err)))
-						continue
-					}
-
-					bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID,
-						fmt.Sprintf("Response time threshold for %s set to %dms", serverName, threshold)))
-				} else {
-					bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID,
-						fmt.Sprintf("Server %s not found", serverName)))
-				}
-
-			case "setcontent":
-				args := strings.Split(update.Message.CommandArguments(), " ")
-				if len(args) < 2 {
-					bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID,
-						"Usage: /setcontent [server_name] [expected_content]"))
-					continue
-				}
-
-				serverName := args[0]
-				expectedContent := strings.Join(args[1:], " ")
-
-				// Update server
-				checksData := checks.ReadChecksData()
-				if server, ok := checksData.HealthChecks[serverName]; ok {
-					server.ExpectedContent = expectedContent
-					checksData.HealthChecks[serverName] = server
-
-					err := checks.SaveChecksData(checksData)
-					if err != nil {
-						bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID,
-							fmt.Sprintf("Failed to update expected content: %v", err)))
-						continue
-					}
-
-					bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID,
-						fmt.Sprintf("Expected content for %s set to: %s", serverName, expectedContent)))
-				} else {
-					bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID,
-						fmt.Sprintf("Server %s not found", serverName)))
-				}
-
-			case "setsslthreshold":
-				args := strings.Split(update.Message.CommandArguments(), " ")
-				if len(args) < 2 {
-					bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID,
-						"Usage: /setsslthreshold [server_name] [days]"))
-					continue
-				}
-
-				serverName := args[0]
-				thresholdStr := args[1]
-
-				// Parse threshold
-				var threshold int
-				_, err := fmt.Sscanf(thresholdStr, "%d", &threshold)
-				if err != nil {
-					bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID,
-						"Invalid threshold value. Please provide a number of days."))
-					continue
-				}
-
-				// Update server
-				checksData := checks.ReadChecksData()
-				if server, ok := checksData.HealthChecks[serverName]; ok {
-					server.SSLExpiryThreshold = threshold
-					checksData.HealthChecks[serverName] = server
-
-					err := checks.SaveChecksData(checksData)
-					if err != nil {
-						bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID,
-							fmt.Sprintf("Failed to update SSL threshold: %v", err)))
-						continue
-					}
-
-					bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID,
-						fmt.Sprintf("SSL expiry threshold for %s set to %d days", serverName, threshold)))
-				} else {
-					bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID,
-						fmt.Sprintf("Server %s not found", serverName)))
-				}
-
-			case "setglobalsslthreshold":
-				thresholdStr := update.Message.CommandArguments()
-				if thresholdStr == "" {
-					bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID,
-						"Usage: /setglobalsslthreshold [days]"))
-					continue
-				}
-
-				// Parse threshold
-				var threshold int
-				_, err := fmt.Sscanf(thresholdStr, "%d", &threshold)
-				if err != nil {
-					bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID,
-						"Invalid threshold value. Please provide a number of days."))
-					continue
-				}
-
-				// Set global threshold
-				checks.SetGlobalSSLExpiryThreshold(threshold)
 
 				bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID,
-					fmt.Sprintf("Global SSL expiry threshold set to %d days", threshold)))
+					fmt.Sprintf("Response time threshold for %s set to %dms", serverName, threshold)))
+			} else {
+				bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID,
+					fmt.Sprintf("Server %s not found", serverName)))
+			}
 
-			case "details":
-				serverName := update.Message.CommandArguments()
-				if serverName == "" {
+		case "setcontent":
+			args := strings.Split(update.Message.CommandArguments(), " ")
+			if len(args) < 2 {
+				bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID,
+					"Usage: /setcontent [server_name] [expected_content]"))
+				return
+			}
+
+			serverName := args[0]
+			expectedContent := strings.Join(args[1:], " ")
+
+			// Update server
+			checksData := checks.ReadChecksData()
+			if server, ok := checksData.HealthChecks[serverName]; ok {
+				server.ExpectedContent = expectedContent
+				checksData.HealthChecks[serverName] = server
+
+				err := checks.SaveChecksData(checksData)
+				if err != nil {
 					bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID,
-						"Usage: /details [server_name]"))
-					continue
+						fmt.Sprintf("Failed to update expected content: %v", err)))
+					return
 				}
 
-				sendServerDetails(bot, update.Message.Chat.ID, serverName)
+				bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID,
+					fmt.Sprintf("Expected content for %s set to: %s", serverName, expectedContent)))
+			} else {
+				bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID,
+					fmt.Sprintf("Server %s not found", serverName)))
 			}
+
+		case "setsslthreshold":
+			args := strings.Split(update.Message.CommandArguments(), " ")
+			if len(args) < 2 {
+				bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID,
+					"Usage: /setsslthreshold [server_name] [days]"))
+				return
+			}
+
+			serverName := args[0]
+			thresholdStr := args[1]
+
+			// Parse threshold
+			var threshold int
+			_, err := fmt.Sscanf(thresholdStr, "%d", &threshold)
+			if err != nil {
+				bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID,
+					"Invalid threshold value. Please provide a number of days."))
+				return
+			}
+
+			// Update server
+			checksData := checks.ReadChecksData()
+			if server, ok := checksData.HealthChecks[serverName]; ok {
+				server.SSLExpiryThreshold = threshold
+				checksData.HealthChecks[serverName] = server
+
+				err := checks.SaveChecksData(checksData)
+				if err != nil {
+					bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID,
+						fmt.Sprintf("Failed to update SSL threshold: %v", err)))
+					return
+				}
+
+				bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID,
+					fmt.Sprintf("SSL expiry threshold for %s set to %d days", serverName, threshold)))
+			} else {
+				bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID,
+					fmt.Sprintf("Server %s not found", serverName)))
+			}
+
+		case "setglobalsslthreshold":
+			thresholdStr := update.Message.CommandArguments()
+			if thresholdStr == "" {
+				bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID,
+					"Usage: /setglobalsslthreshold [days]"))
+				return
+			}
+
+			// Parse threshold
+			var threshold int
+			_, err := fmt.Sscanf(thresholdStr, "%d", &threshold)
+			if err != nil {
+				bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID,
+					"Invalid threshold value. Please provide a number of days."))
+				return
+			}
+
+			// Set global threshold
+			checks.SetGlobalSSLExpiryThreshold(threshold)
+
+			bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID,
+				fmt.Sprintf("Global SSL expiry threshold set to %d days", threshold)))
+
+		case "details":
+			serverName := update.Message.CommandArguments()
+			if serverName == "" {
+				bot.Send(tgbotapi.NewMessage(update.Message.Chat.ID,
+					"Usage: /details [server_name]"))
+				return
+			}
+
+			sendServerDetails(bot, update.Message.Chat.ID, serverName)
 		}
 	}
 }
