@@ -54,6 +54,12 @@ var httpClient = &http.Client{
 // Global threshold for SSL certificates (in days)
 var globalSSLExpiryThreshold = 30
 
+// ResetState clears failure counters and fault message flags (used in tests)
+func ResetState() {
+	serverFailureCount = map[string]int{}
+	serverSendFaultMessage = map[string]bool{}
+}
+
 // ConfigureHttpClient sets the timeout for the HTTP client
 func ConfigureHttpClient(timeout time.Duration) {
 	httpClient.Timeout = timeout

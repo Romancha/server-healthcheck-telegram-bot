@@ -14,9 +14,8 @@ type response struct {
 	Telegram string `json:"telegram,omitempty"`
 }
 
-// Start starts the health check HTTP server on the given address.
-// It blocks until the context is cancelled, then gracefully shuts down.
-func Start(ctx context.Context, addr string, bot *tgbotapi.BotAPI) error {
+// newHealthHandler returns the HTTP handler for the /health endpoint.
+func newHealthHandler(bot *tgbotapi.BotAPI) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -35,10 +34,15 @@ func Start(ctx context.Context, addr string, bot *tgbotapi.BotAPI) error {
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(response{Status: "ok"})
 	})
+	return mux
+}
 
+// Start starts the health check HTTP server on the given address.
+// It blocks until the context is cancelled, then gracefully shuts down.
+func Start(ctx context.Context, addr string, bot *tgbotapi.BotAPI) error {
 	srv := &http.Server{
 		Addr:    addr,
-		Handler: mux,
+		Handler: newHealthHandler(bot),
 	}
 
 	go func() {
