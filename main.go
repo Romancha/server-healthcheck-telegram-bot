@@ -69,7 +69,7 @@ func main() {
 			},
 		}
 		bot, err = tgbotapi.NewBotAPIWithClient(opts.Telegram.Token, tgbotapi.APIEndpoint, proxyClient)
-		log.Printf("[INFO] Using proxy for Telegram API: %s", proxyURL.Host)
+		log.Printf("[INFO] Using proxy for Telegram API")
 	} else {
 		bot, err = tgbotapi.NewBotAPI(opts.Telegram.Token)
 	}

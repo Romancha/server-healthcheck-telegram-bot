@@ -57,11 +57,23 @@ go test ./app/events/
 
 Tests use the standard `testing` package with `httptest` for HTTP mocking. Storage tests use `t.TempDir()` to isolate file operations. There are no external test dependencies.
 
-## Linting
+## Verification After Implementing a Feature
+
+After implementing a feature, always run the full check via Makefile:
 
 ```bash
-go vet ./...
+make all        # runs: lint -> test -> build (full pipeline)
 ```
+
+Or individual steps:
+
+```bash
+make lint       # golangci-lint run ./... (uses .golangci.yml config)
+make test       # go test -v ./...
+make build      # CGO_ENABLED=0 go build
+```
+
+Install linter if missing: `make tools` (installs golangci-lint v2.7.2).
 
 ## Key Architecture Decisions
 
