@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"syscall"
@@ -22,6 +24,7 @@ var opts struct {
 	Telegram struct {
 		Token string `long:"token" env:"TOKEN" description:"Telegram bot token" required:"true"`
 		Chat  int64  `long:"chat" env:"CHAT" description:"Telegram chat id" required:"true"`
+		Proxy string `long:"proxy" env:"PROXY" description:"HTTP proxy URL for Telegram API (e.g. http://user:pass@host:port)"`
 	} `group:"Telegram" namespace:"telegram" env-namespace:"TELEGRAM"`
 
 	AlertThreshold      int              `long:"alert-threshold" env:"ALERT_THRESHOLD" description:"Alert threshold" default:"3"`
@@ -51,7 +54,25 @@ func main() {
 	// Configure SSL expiry threshold
 	checks.SetGlobalSSLExpiryThreshold(opts.SSLExpiryAlertDays)
 
-	bot, err := tgbotapi.NewBotAPI(opts.Telegram.Token)
+	var (
+		bot *tgbotapi.BotAPI
+		err error
+	)
+	if opts.Telegram.Proxy != "" {
+		proxyURL, parseErr := url.Parse(opts.Telegram.Proxy)
+		if parseErr != nil {
+			log.Fatalf("failed to parse proxy URL: %v", parseErr)
+		}
+		proxyClient := &http.Client{
+			Transport: &http.Transport{
+				Proxy: http.ProxyURL(proxyURL),
+			},
+		}
+		bot, err = tgbotapi.NewBotAPIWithClient(opts.Telegram.Token, tgbotapi.APIEndpoint, proxyClient)
+		log.Printf("[INFO] Using proxy for Telegram API: %s", proxyURL.Host)
+	} else {
+		bot, err = tgbotapi.NewBotAPI(opts.Telegram.Token)
+	}
 	if err != nil {
 		log.Fatalf("failed to create bot: %v", err)
 	}

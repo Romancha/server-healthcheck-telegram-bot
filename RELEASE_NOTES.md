@@ -1,5 +1,14 @@
 # Release Notes
 
+## Version 1.2.0 — 24 Feb 2026
+
+### 🆕 New
+- Added HTTP proxy support for Telegram API calls via `--telegram.proxy` flag or `TELEGRAM_PROXY` environment variable.
+- Proxy accepts a URL with basic authentication (e.g. `http://user:pass@host:port`).
+- Health check HTTP requests continue to use the regular network without proxy.
+
+---
+
 ## Version 1.1.0 — 24 Feb 2026
 
 ### 🎉 Major Features
