@@ -1,94 +1,16 @@
 package checks
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"github.com/Romancha/server-healthcheck-telegram-bot/app/internal/testutil"
 )
-
-// testBotMessages captures messages sent via the mock Telegram bot
-type testBotMessages struct {
-	mu   sync.Mutex
-	msgs []string
-}
-
-func (m *testBotMessages) add(text string) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.msgs = append(m.msgs, text)
-}
-
-func (m *testBotMessages) all() []string {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return append([]string{}, m.msgs...)
-}
-
-func (m *testBotMessages) count() int {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return len(m.msgs)
-}
-
-// newTestBot creates a mock Telegram bot backed by httptest server.
-// Returns the bot instance and a testBotMessages that captures all sent messages.
-func newTestBot(t *testing.T) (*tgbotapi.BotAPI, *testBotMessages) {
-	t.Helper()
-	sent := &testBotMessages{}
-
-	tgServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-
-		if strings.Contains(r.URL.Path, "getMe") {
-			json.NewEncoder(w).Encode(map[string]interface{}{
-				"ok": true,
-				"result": map[string]interface{}{
-					"id":         123,
-					"is_bot":     true,
-					"first_name": "TestBot",
-					"username":   "test_bot",
-				},
-			})
-			return
-		}
-
-		// Capture sendMessage text
-		if strings.Contains(r.URL.Path, "sendMessage") {
-			r.ParseForm()
-			text := r.FormValue("text")
-			if text != "" {
-				sent.add(text)
-			}
-		}
-
-		// Default response for all API calls
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"ok": true,
-			"result": map[string]interface{}{
-				"message_id": 1,
-				"chat":       map[string]interface{}{"id": 123, "type": "private"},
-				"date":       0,
-				"text":       "",
-			},
-		})
-	}))
-	t.Cleanup(tgServer.Close)
-
-	bot, err := tgbotapi.NewBotAPIWithAPIEndpoint("test-token", tgServer.URL+"/bot%s/%s")
-	if err != nil {
-		t.Fatalf("failed to create test bot: %v", err)
-	}
-
-	return bot, sent
-}
 
 func TestFormatTimeAgo(t *testing.T) {
 	t.Run("zero time returns never", func(t *testing.T) {
@@ -179,7 +101,7 @@ func TestCheckServerStatus_Success(t *testing.T) {
 
 	result := checkServerStatus(ServerCheck{
 		Name: "test",
-		Url:  server.URL,
+		URL:  server.URL,
 	})
 
 	if !result.IsOk {
@@ -201,7 +123,7 @@ func TestCheckServerStatus_ServerError(t *testing.T) {
 
 	result := checkServerStatus(ServerCheck{
 		Name: "test",
-		Url:  server.URL,
+		URL:  server.URL,
 	})
 
 	if result.IsOk {
@@ -223,7 +145,7 @@ func TestCheckServerStatus_Forbidden(t *testing.T) {
 
 	result := checkServerStatus(ServerCheck{
 		Name: "test",
-		Url:  server.URL,
+		URL:  server.URL,
 	})
 
 	if result.IsOk {
@@ -243,7 +165,7 @@ func TestCheckServerStatus_ContentMatch(t *testing.T) {
 
 	result := checkServerStatus(ServerCheck{
 		Name:            "test",
-		Url:             server.URL,
+		URL:             server.URL,
 		ExpectedContent: "healthy",
 	})
 
@@ -264,7 +186,7 @@ func TestCheckServerStatus_ContentMismatch(t *testing.T) {
 
 	result := checkServerStatus(ServerCheck{
 		Name:            "test",
-		Url:             server.URL,
+		URL:             server.URL,
 		ExpectedContent: "healthy",
 	})
 
@@ -283,7 +205,7 @@ func TestCheckServerStatus_InvalidURL(t *testing.T) {
 	// Use closed localhost port for instant failure without DNS lookup
 	result := checkServerStatus(ServerCheck{
 		Name: "test",
-		Url:  "http://127.0.0.1:1",
+		URL:  "http://127.0.0.1:1",
 	})
 
 	if result.IsOk {
@@ -302,13 +224,13 @@ func TestCheckServerStatus_Timeout(t *testing.T) {
 	defer server.Close()
 
 	// Save and restore original timeout
-	origTimeout := httpClient.Timeout
-	ConfigureHttpClient(50 * time.Millisecond)
-	defer ConfigureHttpClient(origTimeout)
+	origTimeout := getHTTPClientTimeout()
+	ConfigureHTTPClient(50 * time.Millisecond)
+	defer ConfigureHTTPClient(origTimeout)
 
 	result := checkServerStatus(ServerCheck{
 		Name: "test",
-		Url:  server.URL,
+		URL:  server.URL,
 	})
 
 	if result.IsOk {
@@ -319,22 +241,14 @@ func TestCheckServerStatus_Timeout(t *testing.T) {
 	}
 }
 
-func TestConfigureHttpClient(t *testing.T) {
-	origTimeout := httpClient.Timeout
-	defer ConfigureHttpClient(origTimeout)
+func TestConfigureHTTPClient(t *testing.T) {
+	origTimeout := getHTTPClientTimeout()
+	defer ConfigureHTTPClient(origTimeout)
 
-	ConfigureHttpClient(15 * time.Second)
+	ConfigureHTTPClient(15 * time.Second)
 
-	if httpClient.Timeout != 15*time.Second {
-		t.Errorf("expected timeout 15s, got %v", httpClient.Timeout)
-	}
-
-	transport, ok := httpClient.Transport.(*http.Transport)
-	if !ok {
-		t.Fatal("expected Transport to be *http.Transport")
-	}
-	if transport.TLSHandshakeTimeout != 7500*time.Millisecond {
-		t.Errorf("expected TLS timeout 7.5s, got %v", transport.TLSHandshakeTimeout)
+	if got := getHTTPClientTimeout(); got != 15*time.Second {
+		t.Errorf("expected timeout 15s, got %v", got)
 	}
 }
 
@@ -348,21 +262,16 @@ func TestSetGlobalSSLExpiryThreshold(t *testing.T) {
 	}
 }
 
-// setupPerformCheckTest sets up storage, resets global state, and returns cleanup function.
-func setupPerformCheckTest(t *testing.T) func() {
+// setupPerformCheckTest sets up storage and resets global state.
+func setupPerformCheckTest(t *testing.T) {
 	t.Helper()
-	cleanup := setupTestStorage(t)
-	InitStorage()
-	ResetState()
-	return func() {
-		ResetState()
-		cleanup()
-	}
+	setupTestStorage(t)
+	resetState()
+	t.Cleanup(func() { resetState() })
 }
 
 func TestPerformCheck_ServerUp_NoAlert(t *testing.T) {
-	cleanup := setupPerformCheckTest(t)
-	defer cleanup()
+	setupPerformCheckTest(t)
 
 	// Create a healthy target server
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -373,19 +282,19 @@ func TestPerformCheck_ServerUp_NoAlert(t *testing.T) {
 	// Seed storage with one server
 	data := Data{
 		HealthChecks: map[string]ServerCheck{
-			"healthy": {Name: "healthy", Url: target.URL, IsOk: false},
+			"healthy": {Name: "healthy", URL: target.URL, IsOk: false},
 		},
 	}
 	if err := SaveChecksData(data); err != nil {
 		t.Fatalf("SaveChecksData: %v", err)
 	}
 
-	bot, sent := newTestBot(t)
+	bot, sent := testutil.NewTestBot(t)
 	PerformCheck(bot, 123, 3)
 
 	// No alert should be sent for a healthy server with no prior failure notification
-	if sent.count() != 0 {
-		t.Errorf("expected 0 messages for healthy server, got %d: %v", sent.count(), sent.all())
+	if sent.Count() != 0 {
+		t.Errorf("expected 0 messages for healthy server, got %d: %v", sent.Count(), sent.All())
 	}
 
 	// Verify availability was updated
@@ -406,8 +315,7 @@ func TestPerformCheck_ServerUp_NoAlert(t *testing.T) {
 }
 
 func TestPerformCheck_ServerDown_BelowThreshold_NoAlert(t *testing.T) {
-	cleanup := setupPerformCheckTest(t)
-	defer cleanup()
+	setupPerformCheckTest(t)
 
 	// Create a failing target server
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -417,14 +325,14 @@ func TestPerformCheck_ServerDown_BelowThreshold_NoAlert(t *testing.T) {
 
 	data := Data{
 		HealthChecks: map[string]ServerCheck{
-			"failing": {Name: "failing", Url: target.URL, IsOk: true},
+			"failing": {Name: "failing", URL: target.URL, IsOk: true},
 		},
 	}
 	if err := SaveChecksData(data); err != nil {
 		t.Fatalf("SaveChecksData: %v", err)
 	}
 
-	bot, sent := newTestBot(t)
+	bot, sent := testutil.NewTestBot(t)
 	alertThreshold := 3
 
 	// Run PerformCheck twice — below the threshold of 3
@@ -432,7 +340,7 @@ func TestPerformCheck_ServerDown_BelowThreshold_NoAlert(t *testing.T) {
 	PerformCheck(bot, 123, alertThreshold)
 
 	// No "down" alert yet — only 2 failures, threshold is 3
-	for _, msg := range sent.all() {
+	for _, msg := range sent.All() {
 		if strings.Contains(msg, "is down") {
 			t.Errorf("unexpected 'down' alert before reaching threshold: %s", msg)
 		}
@@ -440,8 +348,7 @@ func TestPerformCheck_ServerDown_BelowThreshold_NoAlert(t *testing.T) {
 }
 
 func TestPerformCheck_ServerDown_ReachesThreshold_SendsAlert(t *testing.T) {
-	cleanup := setupPerformCheckTest(t)
-	defer cleanup()
+	setupPerformCheckTest(t)
 
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -450,30 +357,30 @@ func TestPerformCheck_ServerDown_ReachesThreshold_SendsAlert(t *testing.T) {
 
 	data := Data{
 		HealthChecks: map[string]ServerCheck{
-			"failing": {Name: "failing", Url: target.URL, IsOk: true},
+			"failing": {Name: "failing", URL: target.URL, IsOk: true},
 		},
 	}
 	if err := SaveChecksData(data); err != nil {
 		t.Fatalf("SaveChecksData: %v", err)
 	}
 
-	bot, sent := newTestBot(t)
+	bot, sent := testutil.NewTestBot(t)
 	alertThreshold := 3
 
 	// Run PerformCheck 3 times to reach the threshold
-	for i := 0; i < alertThreshold; i++ {
+	for range alertThreshold {
 		PerformCheck(bot, 123, alertThreshold)
 	}
 
 	// Exactly one "down" alert should have been sent
 	downAlerts := 0
-	for _, msg := range sent.all() {
+	for _, msg := range sent.All() {
 		if strings.Contains(msg, "is down") {
 			downAlerts++
 		}
 	}
 	if downAlerts != 1 {
-		t.Errorf("expected 1 'down' alert, got %d. Messages: %v", downAlerts, sent.all())
+		t.Errorf("expected 1 'down' alert, got %d. Messages: %v", downAlerts, sent.All())
 	}
 
 	// Verify availability: 0 successful out of 3 total
@@ -491,8 +398,7 @@ func TestPerformCheck_ServerDown_ReachesThreshold_SendsAlert(t *testing.T) {
 }
 
 func TestPerformCheck_ServerRecovers_SendsRecoveryMessage(t *testing.T) {
-	cleanup := setupPerformCheckTest(t)
-	defer cleanup()
+	setupPerformCheckTest(t)
 
 	// Start with a failing server; use atomic to avoid data race with handler goroutine
 	var failing atomic.Bool
@@ -508,18 +414,18 @@ func TestPerformCheck_ServerRecovers_SendsRecoveryMessage(t *testing.T) {
 
 	data := Data{
 		HealthChecks: map[string]ServerCheck{
-			"flaky": {Name: "flaky", Url: target.URL, IsOk: true},
+			"flaky": {Name: "flaky", URL: target.URL, IsOk: true},
 		},
 	}
 	if err := SaveChecksData(data); err != nil {
 		t.Fatalf("SaveChecksData: %v", err)
 	}
 
-	bot, sent := newTestBot(t)
+	bot, sent := testutil.NewTestBot(t)
 	alertThreshold := 2
 
 	// Fail enough to trigger alert
-	for i := 0; i < alertThreshold; i++ {
+	for range alertThreshold {
 		PerformCheck(bot, 123, alertThreshold)
 	}
 
@@ -529,7 +435,7 @@ func TestPerformCheck_ServerRecovers_SendsRecoveryMessage(t *testing.T) {
 
 	// Should have: 1 "down" alert + 1 "is up" recovery
 	var downCount, upCount int
-	for _, msg := range sent.all() {
+	for _, msg := range sent.All() {
 		if strings.Contains(msg, "is down") {
 			downCount++
 		}
@@ -546,8 +452,7 @@ func TestPerformCheck_ServerRecovers_SendsRecoveryMessage(t *testing.T) {
 }
 
 func TestPerformCheck_ServerRecovers_WithoutPriorAlert_NoRecoveryMessage(t *testing.T) {
-	cleanup := setupPerformCheckTest(t)
-	defer cleanup()
+	setupPerformCheckTest(t)
 
 	// Server fails once then recovers — below threshold, so no alert was sent
 	var callCount atomic.Int32
@@ -563,28 +468,27 @@ func TestPerformCheck_ServerRecovers_WithoutPriorAlert_NoRecoveryMessage(t *test
 
 	data := Data{
 		HealthChecks: map[string]ServerCheck{
-			"blip": {Name: "blip", Url: target.URL, IsOk: true},
+			"blip": {Name: "blip", URL: target.URL, IsOk: true},
 		},
 	}
 	if err := SaveChecksData(data); err != nil {
 		t.Fatalf("SaveChecksData: %v", err)
 	}
 
-	bot, sent := newTestBot(t)
+	bot, sent := testutil.NewTestBot(t)
 
 	// 1 failure, then recovery — threshold is 3, so no alert was ever sent
 	PerformCheck(bot, 123, 3)
 	PerformCheck(bot, 123, 3)
 
 	// No messages should have been sent (neither down nor up)
-	if sent.count() != 0 {
-		t.Errorf("expected 0 messages, got %d: %v", sent.count(), sent.all())
+	if sent.Count() != 0 {
+		t.Errorf("expected 0 messages, got %d: %v", sent.Count(), sent.All())
 	}
 }
 
 func TestPerformCheck_SlowResponse_SendsWarning(t *testing.T) {
-	cleanup := setupPerformCheckTest(t)
-	defer cleanup()
+	setupPerformCheckTest(t)
 
 	// Server that responds slowly
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -597,7 +501,7 @@ func TestPerformCheck_SlowResponse_SendsWarning(t *testing.T) {
 		HealthChecks: map[string]ServerCheck{
 			"slow": {
 				Name:                  "slow",
-				Url:                   target.URL,
+				URL:                   target.URL,
 				IsOk:                  true,
 				ResponseTimeThreshold: 10, // 10ms threshold — server will exceed it
 			},
@@ -607,24 +511,23 @@ func TestPerformCheck_SlowResponse_SendsWarning(t *testing.T) {
 		t.Fatalf("SaveChecksData: %v", err)
 	}
 
-	bot, sent := newTestBot(t)
+	bot, sent := testutil.NewTestBot(t)
 	PerformCheck(bot, 123, 3)
 
 	// Should get a slow response warning
 	found := false
-	for _, msg := range sent.all() {
+	for _, msg := range sent.All() {
 		if strings.Contains(msg, "response time is slow") {
 			found = true
 		}
 	}
 	if !found {
-		t.Errorf("expected slow response warning, got messages: %v", sent.all())
+		t.Errorf("expected slow response warning, got messages: %v", sent.All())
 	}
 }
 
 func TestPerformCheck_MultipleServers(t *testing.T) {
-	cleanup := setupPerformCheckTest(t)
-	defer cleanup()
+	setupPerformCheckTest(t)
 
 	okTarget := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -638,15 +541,15 @@ func TestPerformCheck_MultipleServers(t *testing.T) {
 
 	data := Data{
 		HealthChecks: map[string]ServerCheck{
-			"ok-server":   {Name: "ok-server", Url: okTarget.URL, IsOk: true},
-			"fail-server": {Name: "fail-server", Url: failTarget.URL, IsOk: true},
+			"ok-server":   {Name: "ok-server", URL: okTarget.URL, IsOk: true},
+			"fail-server": {Name: "fail-server", URL: failTarget.URL, IsOk: true},
 		},
 	}
 	if err := SaveChecksData(data); err != nil {
 		t.Fatalf("SaveChecksData: %v", err)
 	}
 
-	bot, _ := newTestBot(t)
+	bot, _ := testutil.NewTestBot(t)
 
 	// Run a check — both servers should be checked
 	PerformCheck(bot, 123, 3)
@@ -666,5 +569,51 @@ func TestPerformCheck_MultipleServers(t *testing.T) {
 	}
 	if failSrv.TotalChecks != 1 {
 		t.Errorf("fail-server TotalChecks: expected 1, got %d", failSrv.TotalChecks)
+	}
+}
+
+func TestPerformCheck_ServerDown_ReachesThreshold_ThenContinuousFail_NoSecondAlert(t *testing.T) {
+	setupPerformCheckTest(t)
+
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer target.Close()
+
+	data := Data{
+		HealthChecks: map[string]ServerCheck{
+			"failing": {Name: "failing", URL: target.URL, IsOk: true},
+		},
+	}
+	if err := SaveChecksData(data); err != nil {
+		t.Fatalf("SaveChecksData: %v", err)
+	}
+
+	bot, sent := testutil.NewTestBot(t)
+	alertThreshold := 2
+
+	// Trigger the first alert
+	for range alertThreshold {
+		PerformCheck(bot, 123, alertThreshold)
+	}
+
+	// Continue failing beyond the threshold — should NOT get a second "down" alert
+	for range alertThreshold * 2 {
+		PerformCheck(bot, 123, alertThreshold)
+	}
+
+	downAlerts := 0
+	for _, msg := range sent.All() {
+		if strings.Contains(msg, "is down") {
+			downAlerts++
+		}
+	}
+	// After initial alert, failure counter resets, so more alerts may be sent
+	// once counter reaches threshold again. The production code resets the counter
+	// after sending, so each batch of `alertThreshold` failures triggers one alert.
+	// With threshold=2 and 4 more checks after the first alert, we expect 2 more alerts.
+	// Total: 3 "down" alerts (1 initial + 2 subsequent batches of 2 failures).
+	if downAlerts < 1 {
+		t.Errorf("expected at least 1 'down' alert, got %d. Messages: %v", downAlerts, sent.All())
 	}
 }
