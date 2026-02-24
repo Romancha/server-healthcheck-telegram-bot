@@ -26,6 +26,8 @@ sends a message to the specified chat.
 - Inline buttons for easy server management
 - Detailed server statistics
 - Telegram commands menu for easy access to all commands
+- Built-in `/health` HTTP endpoint for container health checks
+- Graceful shutdown on SIGINT/SIGTERM
 
 ## Installation and Usage
 
@@ -38,24 +40,38 @@ sends a message to the specified chat.
    - `TELEGRAM_TOKEN` - your bot token
    - `TELEGRAM_CHAT` - your chat id
    - Configure the volumes to persist servers list
-5. Run: `docker-compose up -d`
+5. Run: `docker compose up -d`
+
+The container includes a built-in health check that monitors Telegram API connectivity via the `/health` endpoint.
 
 ### From source
 
-You can also run the bot from source code, build Go binary and run it.
+```bash
+# Build
+make build-local
+
+# Run
+./server-healthcheck \
+  --telegram.token=<TOKEN> \
+  --telegram.chat=<CHAT_ID> \
+  --super=<USERNAME>
+```
 
 ## Configuration
 
-| Param               | Description                                                                                                 |
-|---------------------|-------------------------------------------------------------------------------------------------------------|
-| TELEGRAM_TOKEN      | Telegram bot token, take from [@BotFather](https://t.me/BotFather)                                          |
-| TELEGRAM_CHAT       | Chat ID where the bot will send messages. [@userinfobot](https://t.me/userinfobot) Can help to get chat id  |
-| ALERT_THRESHOLD     | The number of failed requests after which the bot will send a notification. Default ``3``                   |
-| CHECKS_CRON         | [Cron](https://en.wikipedia.org/wiki/Cron) with seconds to checks server status. Default ``*/30 * * * * *`` |
-| HTTP_TIMEOUT        | HTTP request timeout in seconds. Default ``10``                                                             |
-| SSL_EXPIRY_ALERT    | Days before SSL expiry to start alerting. Default ``30``                                                    |
-| DEFAULT_RESPONSE_TIME | Default response time threshold in milliseconds (0 to disable). Default ``0``                             |
-| DEBUG               | Enable debug mode. Default ``false``                                                                        |
+| Param                 | Description                                                                                                  | Default            |
+|-----------------------|--------------------------------------------------------------------------------------------------------------|--------------------|
+| TELEGRAM_TOKEN        | Telegram bot token from [@BotFather](https://t.me/BotFather)                                                 | (required)         |
+| TELEGRAM_CHAT         | Chat ID where the bot will send messages. [@userinfobot](https://t.me/userinfobot) can help to get chat id   | (required)         |
+| ALERT_THRESHOLD       | The number of failed requests after which the bot will send a notification                                    | `3`                |
+| CHECKS_CRON           | [Cron](https://en.wikipedia.org/wiki/Cron) with seconds to check server status                               | `*/30 * * * * *`   |
+| HTTP_TIMEOUT          | HTTP request timeout in seconds                                                                               | `10`               |
+| SSL_EXPIRY_ALERT      | Days before SSL expiry to start alerting                                                                      | `30`               |
+| DEFAULT_RESPONSE_TIME | Default response time threshold in milliseconds (0 to disable)                                                | `0`                |
+| HEALTH_PORT           | Port for the `/health` HTTP endpoint                                                                          | `8081`             |
+| DEBUG                 | Enable debug mode                                                                                             | `false`            |
+
+SuperUsers are specified via repeated `--super=<username>` flags (not environment variables).
 
 ## Commands
 
@@ -74,6 +90,31 @@ All commands are available in the Telegram commands menu (/) for easy access.
 | /setsslthreshold [name] [days]    | Set SSL expiry threshold for specific server                               |
 | /setglobalsslthreshold [days]     | Set global SSL expiry threshold for all servers                            |
 | /help                             | Show help message with all available commands                              |
+
+## Development
+
+```bash
+# Install dev tools (golangci-lint)
+make tools
+
+# Run tests
+make test
+
+# Run tests with race detection
+make test-race
+
+# Run tests with coverage report
+make test-coverage
+
+# Run linter
+make lint
+
+# Format code
+make fmt
+
+# Build binary
+make build
+```
 
 ## Contributing
 

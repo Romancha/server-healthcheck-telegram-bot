@@ -1,4 +1,3 @@
-version: '2'
 services:
   server-healthcheck:
     image: ghcr.io/romancha/server-healthcheck:latest
