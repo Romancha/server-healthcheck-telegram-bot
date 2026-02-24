@@ -25,16 +25,16 @@ func newTestBot(t *testing.T, failAfterInit bool) *tgbotapi.BotAPI {
 			// First call is during bot init — always succeed.
 			// Subsequent calls fail if failAfterInit is true.
 			if failAfterInit && n > 1 {
-				json.NewEncoder(w).Encode(map[string]interface{}{
+				json.NewEncoder(w).Encode(map[string]any{
 					"ok":          false,
 					"description": "Unauthorized",
 					"error_code":  401,
 				})
 				return
 			}
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			json.NewEncoder(w).Encode(map[string]any{
 				"ok": true,
-				"result": map[string]interface{}{
+				"result": map[string]any{
 					"id":         123,
 					"is_bot":     true,
 					"first_name": "TestBot",
@@ -45,9 +45,9 @@ func newTestBot(t *testing.T, failAfterInit bool) *tgbotapi.BotAPI {
 		}
 
 		// Default ok
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		json.NewEncoder(w).Encode(map[string]any{
 			"ok": true,
-			"result": map[string]interface{}{
+			"result": map[string]any{
 				"id":         123,
 				"is_bot":     true,
 				"first_name": "TestBot",
@@ -68,7 +68,7 @@ func TestHealthEndpoint_OK(t *testing.T) {
 	bot := newTestBot(t, false)
 	handler := newHealthHandler(bot)
 
-	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	req := httptest.NewRequest(http.MethodGet, "/health", http.NoBody)
 	rec := httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, req)
@@ -99,7 +99,7 @@ func TestHealthEndpoint_TelegramUnavailable(t *testing.T) {
 	bot := newTestBot(t, true)
 	handler := newHealthHandler(bot)
 
-	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	req := httptest.NewRequest(http.MethodGet, "/health", http.NoBody)
 	rec := httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, req)
@@ -124,7 +124,7 @@ func TestHealthEndpoint_WrongPath_404(t *testing.T) {
 	bot := newTestBot(t, false)
 	handler := newHealthHandler(bot)
 
-	req := httptest.NewRequest(http.MethodGet, "/nonexistent", nil)
+	req := httptest.NewRequest(http.MethodGet, "/nonexistent", http.NoBody)
 	rec := httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, req)

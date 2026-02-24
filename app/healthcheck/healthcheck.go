@@ -3,8 +3,10 @@ package healthcheck
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
+	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
@@ -17,14 +19,14 @@ type response struct {
 // newHealthHandler returns the HTTP handler for the /health endpoint.
 func newHealthHandler(bot *tgbotapi.BotAPI) http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 
 		// Check Telegram API connectivity
 		_, err := bot.GetMe()
 		if err != nil {
 			w.WriteHeader(http.StatusServiceUnavailable)
-			json.NewEncoder(w).Encode(response{
+			_ = json.NewEncoder(w).Encode(response{
 				Status:   "error",
 				Telegram: err.Error(),
 			})
@@ -32,17 +34,18 @@ func newHealthHandler(bot *tgbotapi.BotAPI) http.Handler {
 		}
 
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(response{Status: "ok"})
+		_ = json.NewEncoder(w).Encode(response{Status: "ok"})
 	})
 	return mux
 }
 
 // Start starts the health check HTTP server on the given address.
-// It blocks until the context is cancelled, then gracefully shuts down.
+// It blocks until the context is canceled, then gracefully shuts down.
 func Start(ctx context.Context, addr string, bot *tgbotapi.BotAPI) error {
 	srv := &http.Server{
-		Addr:    addr,
-		Handler: newHealthHandler(bot),
+		Addr:              addr,
+		Handler:           newHealthHandler(bot),
+		ReadHeaderTimeout: 10 * time.Second,
 	}
 
 	go func() {
@@ -55,7 +58,7 @@ func Start(ctx context.Context, addr string, bot *tgbotapi.BotAPI) error {
 
 	log.Printf("[INFO] Health check server starting on %s", addr)
 	if err := srv.ListenAndServe(); err != http.ErrServerClosed {
-		return err
+		return fmt.Errorf("health check server: %w", err)
 	}
 	return nil
 }

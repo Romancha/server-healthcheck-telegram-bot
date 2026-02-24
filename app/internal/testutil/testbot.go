@@ -17,24 +17,28 @@ type BotMessages struct {
 	msgs []string
 }
 
+// Add appends a message to the captured list.
 func (m *BotMessages) Add(text string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.msgs = append(m.msgs, text)
 }
 
+// All returns a copy of all captured messages.
 func (m *BotMessages) All() []string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return append([]string{}, m.msgs...)
 }
 
+// Count returns the number of captured messages.
 func (m *BotMessages) Count() int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return len(m.msgs)
 }
 
+// Last returns the last captured message, or empty string if none.
 func (m *BotMessages) Last() string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -55,9 +59,9 @@ func NewTestBot(t *testing.T) (*tgbotapi.BotAPI, *BotMessages) {
 		w.Header().Set("Content-Type", "application/json")
 
 		if strings.Contains(r.URL.Path, "getMe") {
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]any{
 				"ok": true,
-				"result": map[string]interface{}{
+				"result": map[string]any{
 					"id":         123,
 					"is_bot":     true,
 					"first_name": "TestBot",
@@ -69,7 +73,7 @@ func NewTestBot(t *testing.T) (*tgbotapi.BotAPI, *BotMessages) {
 
 		// Capture sendMessage text
 		if strings.Contains(r.URL.Path, "sendMessage") {
-			r.ParseForm()
+			_ = r.ParseForm()
 			text := r.FormValue("text")
 			if text != "" {
 				sent.Add(text)
@@ -78,7 +82,7 @@ func NewTestBot(t *testing.T) (*tgbotapi.BotAPI, *BotMessages) {
 
 		// Capture editMessageText
 		if strings.Contains(r.URL.Path, "editMessageText") {
-			r.ParseForm()
+			_ = r.ParseForm()
 			text := r.FormValue("text")
 			if text != "" {
 				sent.Add(text)
@@ -86,11 +90,11 @@ func NewTestBot(t *testing.T) (*tgbotapi.BotAPI, *BotMessages) {
 		}
 
 		// Default OK response with Message shape
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"ok": true,
-			"result": map[string]interface{}{
+			"result": map[string]any{
 				"message_id": 1,
-				"chat":       map[string]interface{}{"id": 123, "type": "private"},
+				"chat":       map[string]any{"id": 123, "type": "private"},
 				"date":       0,
 				"text":       "",
 			},

@@ -27,7 +27,7 @@ var opts struct {
 	AlertThreshold      int              `long:"alert-threshold" env:"ALERT_THRESHOLD" description:"Alert threshold" default:"3"`
 	ChecksCron          string           `long:"checks-cron" env:"CHECKS_CRON" description:"Cron spec for checks" default:"*/30 * * * * *"`
 	SuperUsers          events.SuperUser `long:"super" description:"Users names who can manage bot"`
-	HttpTimeout         int              `long:"http-timeout" env:"HTTP_TIMEOUT" description:"HTTP request timeout in seconds" default:"10"`
+	HTTPTimeout         int              `long:"http-timeout" env:"HTTP_TIMEOUT" description:"HTTP request timeout in seconds" default:"10"`
 	SSLExpiryAlertDays  int              `long:"ssl-expiry-alert" env:"SSL_EXPIRY_ALERT" description:"Days before SSL expiry to start alerting" default:"30"`
 	DefaultResponseTime int              `long:"default-response-time" env:"DEFAULT_RESPONSE_TIME" description:"Default response time threshold in milliseconds (0 to disable)" default:"0"`
 	HealthPort          string           `long:"health-port" env:"HEALTH_PORT" description:"Port for health check HTTP server" default:"8081"`
@@ -46,7 +46,7 @@ func main() {
 	checks.InitStorage()
 
 	// Configure HTTP client
-	checks.ConfigureHttpClient(time.Duration(opts.HttpTimeout) * time.Second)
+	checks.ConfigureHTTPClient(time.Duration(opts.HTTPTimeout) * time.Second)
 
 	// Configure SSL expiry threshold
 	checks.SetGlobalSSLExpiryThreshold(opts.SSLExpiryAlertDays)
@@ -71,22 +71,23 @@ func main() {
 
 	// Start health check HTTP server
 	go func() {
-		if err := healthcheck.Start(ctx, ":"+opts.HealthPort, bot); err != nil {
-			log.Printf("[ERROR] Health check server failed: %v", err)
+		if startErr := healthcheck.Start(ctx, ":"+opts.HealthPort, bot); startErr != nil {
+			log.Printf("[ERROR] Health check server failed: %v", startErr)
 		}
 	}()
 
 	// Start cron scheduler
 	c := cron.New(cron.WithSeconds())
-	_, err = c.AddFunc(opts.ChecksCron, func() {
+	if _, cronErr := c.AddFunc(opts.ChecksCron, func() {
 		checks.PerformCheck(bot, opts.Telegram.Chat, opts.AlertThreshold)
-	})
-	if err != nil {
-		log.Fatalf("failed to add cron: %v", err)
+	}); cronErr != nil {
+		log.Printf("[ERROR] failed to add cron: %v", cronErr)
+		cancel()
+		return
 	}
 	c.Start()
 
-	// Start listening for Telegram updates (blocks until context is cancelled)
+	// Start listening for Telegram updates (blocks until context is canceled)
 	go events.ListenTelegramUpdates(ctx, bot, opts.SuperUsers)
 
 	// Wait for shutdown signal

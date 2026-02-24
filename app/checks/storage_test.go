@@ -8,20 +8,20 @@ import (
 	"time"
 )
 
-// setupTestStorage sets storageLocation to a temp dir and returns a cleanup func.
-func setupTestStorage(t *testing.T) func() {
+// setupTestStorage redirects storageLocation to a temp dir and initializes it.
+func setupTestStorage(t *testing.T) {
 	t.Helper()
 	tmpDir := t.TempDir()
-	original := storageLocation
-	storageLocation = filepath.Join(tmpDir, "checks.json")
-	return func() {
-		storageLocation = original
-	}
+	original := SetStorageLocation(filepath.Join(tmpDir, "checks.json"))
+	t.Cleanup(func() { SetStorageLocation(original) })
+	InitStorage()
 }
 
 func TestInitStorage(t *testing.T) {
-	cleanup := setupTestStorage(t)
-	defer cleanup()
+	// Use manual setup here because we need to test InitStorage itself
+	tmpDir := t.TempDir()
+	original := SetStorageLocation(filepath.Join(tmpDir, "checks.json"))
+	t.Cleanup(func() { SetStorageLocation(original) })
 
 	// File should not exist yet
 	if _, err := os.Stat(storageLocation); !os.IsNotExist(err) {
@@ -41,15 +41,12 @@ func TestInitStorage(t *testing.T) {
 }
 
 func TestInitStorageIdempotent(t *testing.T) {
-	cleanup := setupTestStorage(t)
-	defer cleanup()
-
-	InitStorage()
+	setupTestStorage(t)
 
 	// Write some data
 	data := Data{
 		HealthChecks: map[string]ServerCheck{
-			"test": {Name: "test", Url: "https://example.com"},
+			"test": {Name: "test", URL: "https://example.com"},
 		},
 	}
 	err := SaveChecksData(data)
@@ -67,9 +64,7 @@ func TestInitStorageIdempotent(t *testing.T) {
 }
 
 func TestSaveAndReadChecksData(t *testing.T) {
-	cleanup := setupTestStorage(t)
-	defer cleanup()
-	InitStorage()
+	setupTestStorage(t)
 
 	now := time.Now().Truncate(time.Second)
 
@@ -77,7 +72,7 @@ func TestSaveAndReadChecksData(t *testing.T) {
 		HealthChecks: map[string]ServerCheck{
 			"server1": {
 				Name:             "server1",
-				Url:              "https://example.com",
+				URL:              "https://example.com",
 				IsOk:             true,
 				LastSuccess:      now,
 				Availability:     99.5,
@@ -87,7 +82,7 @@ func TestSaveAndReadChecksData(t *testing.T) {
 			},
 			"server2": {
 				Name:            "server2",
-				Url:             "https://test.com",
+				URL:             "https://test.com",
 				IsOk:            false,
 				LastFailure:     now,
 				ExpectedContent: "OK",
@@ -107,8 +102,8 @@ func TestSaveAndReadChecksData(t *testing.T) {
 	}
 
 	s1 := got.HealthChecks["server1"]
-	if s1.Url != "https://example.com" {
-		t.Errorf("server1.Url = %q, want %q", s1.Url, "https://example.com")
+	if s1.URL != "https://example.com" {
+		t.Errorf("server1.Url = %q, want %q", s1.URL, "https://example.com")
 	}
 	if !s1.IsOk {
 		t.Error("server1.IsOk = false, want true")
@@ -130,9 +125,7 @@ func TestSaveAndReadChecksData(t *testing.T) {
 }
 
 func TestSaveAndReadEmptyData(t *testing.T) {
-	cleanup := setupTestStorage(t)
-	defer cleanup()
-	InitStorage()
+	setupTestStorage(t)
 
 	data := Data{
 		HealthChecks: make(map[string]ServerCheck),
@@ -150,14 +143,12 @@ func TestSaveAndReadEmptyData(t *testing.T) {
 }
 
 func TestConcurrentReadWrite(t *testing.T) {
-	cleanup := setupTestStorage(t)
-	defer cleanup()
-	InitStorage()
+	setupTestStorage(t)
 
 	// Seed initial data
 	data := Data{
 		HealthChecks: map[string]ServerCheck{
-			"s1": {Name: "s1", Url: "https://example.com", IsOk: true},
+			"s1": {Name: "s1", URL: "https://example.com", IsOk: true},
 		},
 	}
 	if err := SaveChecksData(data); err != nil {
@@ -171,7 +162,7 @@ func TestConcurrentReadWrite(t *testing.T) {
 	start := make(chan struct{})
 
 	// Mix reads and writes in a single loop for true concurrency
-	for i := 0; i < goroutines; i++ {
+	for range goroutines {
 		wg.Add(2)
 		go func() {
 			defer wg.Done()

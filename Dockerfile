@@ -1,17 +1,16 @@
-FROM golang:alpine as builder
-LABEL maintainer="romanchabest55@gmail.com"
+FROM golang:1.26-alpine AS builder
 
-RUN apk update && apk add --no-cache git ca-certificates tzdata && update-ca-certificates
+RUN apk add --no-cache ca-certificates tzdata && update-ca-certificates
 
-WORKDIR $GOPATH/src/mypackage/myapp/
-COPY . .
+WORKDIR /build
 
-RUN go get -d -v
+COPY go.mod go.sum ./
 RUN go mod download
 
+COPY . .
+
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
-    -ldflags='-w -s -extldflags "-static"' -a \
-    -o /go/bin/app .
+    -ldflags='-w -s' -o /go/bin/app .
 
 FROM alpine:3
 
